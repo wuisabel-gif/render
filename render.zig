@@ -5,7 +5,6 @@
 // No GPU, no Vulkan, no external libraries: the PNG encoder is built in.
 //
 //   zig run render.zig
-//   zig run render.zig -- 1920 1200 2.0 1.3   (width height time turbidity)
 //
 // Slang -> Zig mapping: frac->fract, saturate->clamp01, lerp->mix,
 // float2/float3 -> Vec2/Vec3. The uv orientation matches the shader:
