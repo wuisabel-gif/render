@@ -8,21 +8,23 @@ Adler32, stored deflate) is built in. No GPU, no libraries.
 ## Run
 
 ```sh
-zig run -O ReleaseFast render.zig
+zig run -O ReleaseFast render.zig                       # defaults
+zig run -O ReleaseFast render.zig -- 1920 1200 2.0 0.3  # width height time turbidity
 ```
 
-Writes `robopool.png`. Requires Zig 0.16 (uses the new `std.Io` API).
+Writes `robopool.png`. Requires Zig 0.16 (uses the new `std.Io` API). Trailing
+args are optional and positional; junk or `0` dimensions fall back to the default.
 
 ## Parameters
 
-Edit the consts at the top of `main` in [render.zig](render.zig):
+Pass as positional CLI args (see above), in this order:
 
-| Const       | Default | Meaning                          |
-|-------------|---------|----------------------------------|
-| `width`     | 1280    | Output width in pixels           |
-| `height`    | 800     | Output height in pixels          |
-| `time`      | 1.5     | Animation time (caustics, water) |
-| `turbidity` | 1.0     | Water murkiness                  |
+| Arg | Name        | Default | Meaning                          |
+|-----|-------------|---------|----------------------------------|
+| 1   | `width`     | 1280    | Output width in pixels           |
+| 2   | `height`    | 800     | Output height in pixels          |
+| 3   | `time`      | 1.5     | Animation time (caustics, water) |
+| 4   | `turbidity` | 1.0     | Water murkiness                  |
 
 ## Renders
 

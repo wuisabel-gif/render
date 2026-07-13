@@ -4,7 +4,8 @@
 // CPU, one pixel at a time, and writes the result straight to robopool.png.
 // No GPU, no Vulkan, no external libraries: the PNG encoder is built in.
 //
-//   zig run render.zig
+//   zig run render.zig                       (defaults: 1280x800, time 1.5, turbidity 1.0)
+//   zig run render.zig -- 1920 1200 2.0 0.3  (width height time turbidity; trailing args optional)
 //
 // Slang -> Zig mapping: frac->fract, saturate->clamp01, lerp->mix,
 // float2/float3 -> Vec2/Vec3. The uv orientation matches the shader:
@@ -272,15 +273,33 @@ fn encodePng(allocator: std.mem.Allocator, pixels: []const u8, w: u32, h: u32) !
 }
 
 // --------------------------------------------------------------------- main
-pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+fn parseDim(s: []const u8, fallback: u32) u32 {
+    const v = std.fmt.parseInt(u32, s, 10) catch return fallback;
+    return if (v == 0) fallback else v;
+}
 
-    // Edit these to change the output. (These are the RenderParameters the
-    // Slang shader receives from its ConstantBuffer.)
-    const width: u32 = 1280;
-    const height: u32 = 800;
-    const time: f32 = 1.5;
-    const turbidity: f32 = 1.0;
+test "parseDim falls back on junk and zero, parses valid" {
+    try std.testing.expectEqual(@as(u32, 1280), parseDim("abc", 1280));
+    try std.testing.expectEqual(@as(u32, 1280), parseDim("0", 1280));
+    try std.testing.expectEqual(@as(u32, 1920), parseDim("1920", 1280));
+}
+
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
+
+    // Defaults are the shader's RenderParameters; CLI args override in order.
+    var width: u32 = 1280;
+    var height: u32 = 800;
+    var time: f32 = 1.5;
+    var turbidity: f32 = 1.0;
+
+    var it = init.minimal.args.iterate();
+    _ = it.skip(); // argv[0]
+    if (it.next()) |a| width = parseDim(a, width);
+    if (it.next()) |a| height = parseDim(a, height);
+    if (it.next()) |a| time = std.fmt.parseFloat(f32, a) catch time;
+    if (it.next()) |a| turbidity = std.fmt.parseFloat(f32, a) catch turbidity;
 
     std.debug.print(
         \\========================================
@@ -311,10 +330,6 @@ pub fn main() !void {
 
     const png = try encodePng(allocator, pixels, width, height);
     defer allocator.free(png);
-
-    var threaded: std.Io.Threaded = .init(allocator, .{});
-    defer threaded.deinit();
-    const io = threaded.io();
 
     const file = try std.Io.Dir.cwd().createFile(io, "robopool.png", .{});
     defer file.close(io);
