@@ -2,7 +2,8 @@
 //
 // Runs the exact same renderPool() math the compute shader runs, but on the
 // CPU, one pixel at a time, and writes the result straight to robopool.png.
-// No GPU, no Vulkan, no external libraries: the PNG encoder is built in.
+// No GPU, no Vulkan, no third-party libraries. The PNG encoder is hand-rolled
+// (CRC32 + chunk assembly); deflate compression comes from std.compress.flate.
 //
 //   zig run render.zig                       (defaults: 1280x800, time 1.5, turbidity 1.0)
 //   zig run render.zig -- 1920 1200 2.0 0.3  (width height time turbidity; trailing args optional)
@@ -170,16 +171,6 @@ fn crc32(data: []const u8, seed: u32) u32 {
     return crc ^ 0xFFFFFFFF;
 }
 
-fn adler32(data: []const u8) u32 {
-    var a: u32 = 1;
-    var b: u32 = 0;
-    for (data) |x| {
-        a = (a + x) % 65521;
-        b = (b + a) % 65521;
-    }
-    return (b << 16) | a;
-}
-
 const Buf = struct {
     data: []u8,
     len: usize = 0,
@@ -224,31 +215,16 @@ fn encodePng(allocator: std.mem.Allocator, pixels: []const u8, w: u32, h: u32) !
         }
     }
 
-    // zlib stream of stored (uncompressed) deflate blocks.
-    const max_block = 65535;
-    const nblocks = (raw_len + max_block - 1) / max_block;
-    const zlib_len = 2 + nblocks * 5 + raw_len + 4;
-    const zlib = try allocator.alloc(u8, zlib_len);
-    defer allocator.free(zlib);
-    {
-        var zb = Buf{ .data = zlib };
-        zb.put(0x78);
-        zb.put(0x01);
-        var off: usize = 0;
-        while (off < raw_len) {
-            const n = @min(max_block, raw_len - off);
-            const final: u8 = if (off + n >= raw_len) 1 else 0;
-            zb.put(final);
-            zb.put(@intCast(n & 0xFF));
-            zb.put(@intCast((n >> 8) & 0xFF));
-            const nn = ~@as(u16, @intCast(n));
-            zb.put(@intCast(nn & 0xFF));
-            zb.put(@intCast((nn >> 8) & 0xFF));
-            zb.bytes(raw[off .. off + n]);
-            off += n;
-        }
-        zb.be32(adler32(raw));
-    }
+    // Compress the scanlines into a zlib stream (stdlib deflate).
+    var zw: std.Io.Writer.Allocating = try .initCapacity(allocator, raw_len / 2 + 64);
+    defer zw.deinit();
+    const window = try allocator.alloc(u8, std.compress.flate.max_window_len);
+    defer allocator.free(window);
+    var comp = try std.compress.flate.Compress.init(&zw.writer, window, .zlib, .default);
+    try comp.writer.writeAll(raw);
+    try comp.finish();
+    const zlib = zw.written();
+    const zlib_len = zlib.len;
 
     // Assemble the full PNG.
     const total = 8 + 25 + (12 + zlib_len) + 12;

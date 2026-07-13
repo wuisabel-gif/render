@@ -2,8 +2,9 @@
 
 A single-file, dependency-free CPU port of the `robopool.slang` compute shader.
 Renders an underwater robotics pool scene (gate, buoy, mission bin, tiled floor,
-caustics, particles, haze, vignette) and writes a PNG — the encoder (CRC32,
-Adler32, stored deflate) is built in. No GPU, no libraries.
+caustics, particles, haze, vignette) and writes a compressed PNG. The encoder
+(CRC32, chunk assembly) is hand-rolled; deflate comes from Zig's stdlib
+(`std.compress.flate`). No GPU, no third-party libraries.
 
 ## Run
 
