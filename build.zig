@@ -42,9 +42,18 @@ pub fn build(b: *std.Build) void {
     });
     const run_splat_tests = b.addRunArtifact(splat_tests);
 
-    const test_step = b.step("test", "Run render, medium, PLY, and splat tests");
+    const golden_module = b.createModule(.{
+        .root_source_file = b.path("src/testing/golden.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const golden = b.addExecutable(.{ .name = "golden", .root_module = golden_module });
+    const run_golden = b.addRunArtifact(golden);
+
+    const test_step = b.step("test", "Run render, medium, PLY, splat, and golden tests");
     test_step.dependOn(&run_render_tests.step);
     test_step.dependOn(&run_medium_tests.step);
     test_step.dependOn(&run_ply_tests.step);
     test_step.dependOn(&run_splat_tests.step);
+    test_step.dependOn(&run_golden.step);
 }
