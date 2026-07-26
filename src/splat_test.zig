@@ -57,6 +57,51 @@ test "medium transformation uses expected splat depth" {
     }, 0.0);
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), buffers.rgb[4 * 3], 1e-3);
 }
+test "degree zero keeps DC colour and degree one responds to direction" {
+    var g = gaussian(2, .{0.5, 0.5, 0.5}, 0);
+    var rest = [_]f32{ 0, 0, 0, 1, 0, 0 };
+    g.f_rest = &rest;
+    var gs = [_]ply.Gaussian{g};
+    const cloud = ply.Cloud{ .gaussians = &gs, .sh_degree = 1, .allocator = std.testing.allocator };
+    var dc = try splat.Buffers.init(std.testing.allocator, .{ .width = 3, .height = 3 });
+    defer dc.deinit(std.testing.allocator);
+    var directional = try splat.Buffers.init(std.testing.allocator, .{ .width = 3, .height = 3 });
+    defer directional.deinit(std.testing.allocator);
+    try splat.renderInto(std.testing.allocator, cloud, camera(), .{ .width = 3, .height = 3 }, dc);
+    try splat.renderIntoWithDegree(std.testing.allocator, cloud, camera(), .{ .width = 3, .height = 3 }, directional, 1);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), dc.rgb[4 * 3], 1e-5);
+    try std.testing.expect(directional.rgb[4 * 3] < dc.rgb[4 * 3]);
+    try std.testing.expect(directional.rgb[4 * 3] < 0.1);
+}
+
+test "SH degree is clamped to three" {
+    var g = gaussian(2, .{0.5, 0.5, 0.5}, 0);
+    var rest = [_]f32{0} ** 45;
+    rest[3 * 3] = 1;
+    g.f_rest = &rest;
+    var gs = [_]ply.Gaussian{g};
+    const cloud = ply.Cloud{ .gaussians = &gs, .sh_degree = 3, .allocator = std.testing.allocator };
+    var a = try splat.Buffers.init(std.testing.allocator, .{ .width = 1, .height = 1 });
+    defer a.deinit(std.testing.allocator);
+    var b = try splat.Buffers.init(std.testing.allocator, .{ .width = 1, .height = 1 });
+    defer b.deinit(std.testing.allocator);
+    try splat.renderIntoWithDegree(std.testing.allocator, cloud, camera(), .{ .width = 1, .height = 1 }, a, 3);
+    try splat.renderIntoWithDegree(std.testing.allocator, cloud, camera(), .{ .width = 1, .height = 1 }, b, 99);
+    try std.testing.expectEqualSlices(f32, a.rgb, b.rgb);
+}
+
+test "short SH rest arrays are safe" {
+    var g = gaussian(2, .{0.5, 0.5, 0.5}, 0);
+    var rest = [_]f32{1};
+    g.f_rest = &rest;
+    var gs = [_]ply.Gaussian{g};
+    const cloud = ply.Cloud{ .gaussians = &gs, .sh_degree = 3, .allocator = std.testing.allocator };
+    var buffers = try splat.Buffers.init(std.testing.allocator, .{ .width = 1, .height = 1 });
+    defer buffers.deinit(std.testing.allocator);
+    try splat.renderIntoWithDegree(std.testing.allocator, cloud, camera(), .{ .width = 1, .height = 1 }, buffers, 3);
+    try std.testing.expect(std.math.isFinite(buffers.rgb[0]));
+}
+
 test "ignores rest coefficients and rejects invalid output dimensions" {
     var g = gaussian(2, .{0, 1, 0}, 0);
     var rest = [_]f32{1000, -1000, 1000};
