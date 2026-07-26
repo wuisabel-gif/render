@@ -33,8 +33,18 @@ pub fn build(b: *std.Build) void {
     });
     const run_ply_tests = b.addRunArtifact(ply_tests);
 
-    const test_step = b.step("test", "Run render, medium, and PLY tests");
+    const splat_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/splat_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_splat_tests = b.addRunArtifact(splat_tests);
+
+    const test_step = b.step("test", "Run render, medium, PLY, and splat tests");
     test_step.dependOn(&run_render_tests.step);
     test_step.dependOn(&run_medium_tests.step);
     test_step.dependOn(&run_ply_tests.step);
+    test_step.dependOn(&run_splat_tests.step);
 }
