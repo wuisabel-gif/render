@@ -38,6 +38,25 @@ test "front to back compositing and expected depth use view order" {
     try std.testing.expect(buffers.depth[4] < 2.0);
 }
 
+test "medium transformation uses expected splat depth" {
+    var gs = [_]ply.Gaussian{gaussian(2, .{1, 1, 1}, 0)};
+    const cloud = ply.Cloud{ .gaussians = &gs, .sh_degree = 0, .allocator = std.testing.allocator };
+    var buffers = try splat.Buffers.init(std.testing.allocator, .{ .width = 3, .height = 3 });
+    defer buffers.deinit(std.testing.allocator);
+    try splat.renderIntoWithMedium(std.testing.allocator, cloud, camera(), .{ .width = 3, .height = 3 }, buffers, .{
+        .beta_d = .{ 1, 1, 1 },
+        .beta_b = .{ 0, 0, 0 },
+        .b_inf = .{ 0, 0, 0 },
+    });
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5) * @exp(-2.0), buffers.rgb[4 * 3], 1e-3);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), buffers.depth[4], 1e-5);
+    try splat.renderIntoWithMediumScale(std.testing.allocator, cloud, camera(), .{ .width = 3, .height = 3 }, buffers, .{
+        .beta_d = .{ 1, 1, 1 },
+        .beta_b = .{ 0, 0, 0 },
+        .b_inf = .{ 0, 0, 0 },
+    }, 0.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), buffers.rgb[4 * 3], 1e-3);
+}
 test "ignores rest coefficients and rejects invalid output dimensions" {
     var g = gaussian(2, .{0, 1, 0}, 0);
     var rest = [_]f32{1000, -1000, 1000};

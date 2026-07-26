@@ -1,5 +1,6 @@
 const std = @import("std");
 const ply = @import("ply.zig");
+const medium = @import("medium.zig");
 
 /// A pinhole camera. `forward` points from the camera into the scene, and all
 /// three basis vectors are expected to be orthonormal. `focal_x` and
@@ -116,10 +117,22 @@ fn project(g: ply.Gaussian, camera: Camera) ?Projected {
 
 fn nearer(_: void, a: Projected, b: Projected) bool { return a.depth < b.depth; }
 
-/// Rasterise DC-only Gaussian splats into caller-provided buffers. Existing
-/// buffer contents are replaced. Gaussians are sorted nearest-first and each
-/// pixel is composited front-to-back; f_rest is intentionally not evaluated.
+/// Render without a medium transformation.
 pub fn renderInto(allocator: std.mem.Allocator, cloud: ply.Cloud, camera: Camera, image: Image, buffers: Buffers) !void {
+    return renderIntoWithMediumScale(allocator, cloud, camera, image, buffers, null, 1.0);
+}
+
+/// Apply the medium at full strength after rasterisation.
+pub fn renderIntoWithMedium(allocator: std.mem.Allocator, cloud: ply.Cloud, camera: Camera, image: Image, buffers: Buffers, params: ?medium.Params) !void {
+    return renderIntoWithMediumScale(allocator, cloud, camera, image, buffers, params, 1.0);
+}
+
+/// Rasterise and, when supplied, apply the underwater medium per pixel using
+/// the expected view depth accumulated in `buffers.depth`. `medium_scale` is
+/// clamped to [0, 1]; zero disables the medium without changing the splat
+/// colours. A zero depth marks pixels with no splat contribution and leaves
+/// their RGB value unchanged.
+pub fn renderIntoWithMediumScale(allocator: std.mem.Allocator, cloud: ply.Cloud, camera: Camera, image: Image, buffers: Buffers, params: ?medium.Params, medium_scale: f32) !void {
     const pixels = std.math.mul(usize, image.width, image.height) catch return error.InvalidImage;
     if (image.width == 0 or image.height == 0 or buffers.rgb.len != pixels * 3 or buffers.depth.len != pixels) return error.InvalidImage;
     buffers.clear();
@@ -156,5 +169,20 @@ pub fn renderInto(allocator: std.mem.Allocator, cloud: ply.Cloud, camera: Camera
     for (0..pixels) |index| {
         const accumulated = 1.0 - transmittance[index];
         if (accumulated > 0.0) buffers.depth[index] /= accumulated;
+    }
+    if (params) |p| {
+        const scale = clamp01(medium_scale);
+        const scaled = medium.Params{
+            .beta_d = .{ p.beta_d[0] * scale, p.beta_d[1] * scale, p.beta_d[2] * scale },
+            .beta_b = .{ p.beta_b[0] * scale, p.beta_b[1] * scale, p.beta_b[2] * scale },
+            .b_inf = .{ p.b_inf[0] * scale, p.b_inf[1] * scale, p.b_inf[2] * scale },
+        };
+        for (0..pixels) |index| {
+            if (buffers.depth[index] == 0.0) continue;
+            const transformed = medium.apply(.{ buffers.rgb[index * 3], buffers.rgb[index * 3 + 1], buffers.rgb[index * 3 + 2] }, buffers.depth[index], scaled);
+            buffers.rgb[index * 3] = transformed[0];
+            buffers.rgb[index * 3 + 1] = transformed[1];
+            buffers.rgb[index * 3 + 2] = transformed[2];
+        }
     }
 }
