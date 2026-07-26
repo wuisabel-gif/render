@@ -13,6 +13,7 @@
 // uv.y = 0 at the top row (SV_DispatchThreadID.y counts downward).
 
 const std = @import("std");
+const medium = @import("src/medium.zig");
 
 // ------------------------------------------------------------------ vectors
 const Vec2 = struct {
@@ -86,7 +87,7 @@ fn circleMask(uv: Vec2, c: Vec2, r: f32) f32 {
     return 1.0 - step(r, dist2(uv, c));
 }
 
-fn renderPool(uv: Vec2, time: f32, turbidity: f32) Vec3 {
+fn renderPool(uv: Vec2, time: f32, params: medium.Params) Vec3 {
     const waterColor = Vec3.init(0.025, 0.23, 0.38);
     const tileColor = Vec3.init(0.54, 0.74, 0.82);
     var color = waterColor;
@@ -144,9 +145,10 @@ fn renderPool(uv: Vec2, time: f32, turbidity: f32) Vec3 {
     const particle = step(0.9975, particleNoise);
     color = color.add(Vec3.init(0.42, 0.60, 0.62).scale(particle));
 
-    // Underwater haze.
-    const distanceFog = clamp01(uv.y * turbidity);
-    color = color.mixv(Vec3.init(0.015, 0.18, 0.28), distanceFog * 0.48);
+    // The procedural path has no metric Z, so use its normalized screen-space
+    // coordinate as the legacy compatibility path's range parameter.
+    const mediumColor = medium.apply(.{ color.x, color.y, color.z }, uv.y, params);
+    color = Vec3.init(mediumColor[0], mediumColor[1], mediumColor[2]);
 
     // Camera vignette.
     const cx = uv.x - 0.5;
@@ -304,6 +306,17 @@ fn parseDim(s: []const u8, fallback: u32) u32 {
     return if (v == 0) fallback else v;
 }
 
+fn parseVec3(s: []const u8) ?[3]f32 {
+    var values: [3]f32 = undefined;
+    var parts = std.mem.splitScalar(u8, s, ',');
+    for (0..3) |index| {
+        const part = parts.next() orelse return null;
+        values[index] = std.fmt.parseFloat(f32, part) catch return null;
+    }
+    if (parts.next() != null) return null;
+    return values;
+}
+
 test "parseDim falls back on junk and zero, parses valid" {
     try std.testing.expectEqual(@as(u32, 1280), parseDim("abc", 1280));
     try std.testing.expectEqual(@as(u32, 1280), parseDim("0", 1280));
@@ -314,6 +327,12 @@ test "depth AOV uses the normalized procedural floor coordinate" {
     try std.testing.expectEqual(@as(f32, 0.0), proceduralDepth(.{ .x = 0.5, .y = 0.2 }));
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), proceduralDepth(.{ .x = 0.5, .y = 0.42 }), 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), proceduralDepth(.{ .x = 0.5, .y = 1.0 }), 1e-6);
+}
+
+test "parseVec3 accepts exactly three floats" {
+    try std.testing.expectEqual([3]f32{ 0.1, 0.2, 0.3 }, parseVec3("0.1,0.2,0.3").?);
+    try std.testing.expect(parseVec3("0.1,0.2") == null);
+    try std.testing.expect(parseVec3("0.1,0.2,0.3,0.4") == null);
 }
 
 fn proceduralDepth(uv: Vec2) f32 {
@@ -332,12 +351,34 @@ pub fn main(init: std.process.Init) !void {
     var turbidity: f32 = 1.0;
     var write_depth = false;
     var positional: u8 = 0;
+    var beta_d_override: ?[3]f32 = null;
+    var beta_b_override: ?[3]f32 = null;
+    var b_inf_override: ?[3]f32 = null;
 
     var it = init.minimal.args.iterate();
     _ = it.skip(); // argv[0]
     while (it.next()) |arg| {
         if (std.mem.eql(u8, arg, "--depth")) {
             write_depth = true;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--turbidity")) {
+            turbidity = std.fmt.parseFloat(f32, it.next() orelse return error.MissingTurbidity) catch return error.InvalidTurbidity;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--beta-d") or std.mem.startsWith(u8, arg, "--beta-d=")) {
+            const value = if (std.mem.eql(u8, arg, "--beta-d")) it.next() orelse return error.MissingBetaD else arg[9..];
+            beta_d_override = parseVec3(value) orelse return error.InvalidBetaD;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--beta-b") or std.mem.startsWith(u8, arg, "--beta-b=")) {
+            const value = if (std.mem.eql(u8, arg, "--beta-b")) it.next() orelse return error.MissingBetaB else arg[9..];
+            beta_b_override = parseVec3(value) orelse return error.InvalidBetaB;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--b-inf") or std.mem.startsWith(u8, arg, "--b-inf=")) {
+            const value = if (std.mem.eql(u8, arg, "--b-inf")) it.next() orelse return error.MissingBInf else arg[7..];
+            b_inf_override = parseVec3(value) orelse return error.InvalidBInf;
             continue;
         }
         switch (positional) {
@@ -349,6 +390,16 @@ pub fn main(init: std.process.Init) !void {
         }
         positional += 1;
     }
+
+    const turbidityVector = [3]f32{ turbidity, turbidity, turbidity };
+    var params = medium.Params{
+        .beta_d = turbidityVector,
+        .beta_b = turbidityVector,
+        .b_inf = .{ 0.015, 0.18, 0.28 },
+    };
+    if (beta_d_override) |value| params.beta_d = value;
+    if (beta_b_override) |value| params.beta_b = value;
+    if (b_inf_override) |value| params.b_inf = value;
 
     std.debug.print(
         \\========================================
@@ -372,7 +423,7 @@ pub fn main(init: std.process.Init) !void {
                 (@as(f32, @floatFromInt(x)) + 0.5) / @as(f32, @floatFromInt(width)),
                 (@as(f32, @floatFromInt(y)) + 0.5) / @as(f32, @floatFromInt(height)),
             );
-            const c = renderPool(uv, time, turbidity);
+            const c = renderPool(uv, time, params);
             if (depth) |values| values[@as(usize, y) * width + x] = proceduralDepth(uv);
             const i = (@as(usize, y) * width + x) * 3;
             pixels[i + 0] = @intFromFloat(clamp01(c.x) * 255.0 + 0.5);

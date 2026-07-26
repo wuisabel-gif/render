@@ -25,7 +25,13 @@ Pass as positional CLI args (see above), in this order:
 | 1   | `width`     | 1280    | Output width in pixels           |
 | 2   | `height`    | 800     | Output height in pixels          |
 | 3   | `time`      | 1.5     | Animation time (caustics, water) |
-| 4   | `turbidity` | 1.0     | Water murkiness                  |
+| 4   | `turbidity` | 1.0     | Deprecated convenience mapping to equal `beta_d` and `beta_b` channels |
+
+For channel-wise control, pass comma-separated RGB values with
+`--beta-d R,G,B`, `--beta-b R,G,B`, and `--b-inf R,G,B`. These options use the
+legacy procedural path's normalized screen-space coordinate rather than metric
+scene distance. Positional `turbidity` remains supported for compatibility and
+is overridden per channel when an explicit option is supplied.
 
 ## Renders
 
