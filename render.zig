@@ -248,6 +248,56 @@ fn encodePng(allocator: std.mem.Allocator, pixels: []const u8, w: u32, h: u32) !
     return out;
 }
 
+fn encodeDepthPng(allocator: std.mem.Allocator, depth: []const f32, w: u32, h: u32) ![]u8 {
+    // Raw filtered scanlines: one filter byte plus one big-endian 16-bit
+    // grayscale sample per pixel. Depth is already normalized to [0, 1].
+    const row_bytes = w * 2;
+    const raw_len = h * (1 + row_bytes);
+    const raw = try allocator.alloc(u8, raw_len);
+    defer allocator.free(raw);
+    var y: u32 = 0;
+    var o: usize = 0;
+    while (y < h) : (y += 1) {
+        raw[o] = 0;
+        o += 1;
+        var x: u32 = 0;
+        while (x < w) : (x += 1) {
+            const value = @as(u16, @intFromFloat(clamp01(depth[@as(usize, y) * w + x]) * 65535.0 + 0.5));
+            raw[o] = @intCast(value >> 8);
+            raw[o + 1] = @intCast(value & 0xff);
+            o += 2;
+        }
+    }
+
+    var zw: std.Io.Writer.Allocating = try .initCapacity(allocator, raw_len / 2 + 64);
+    defer zw.deinit();
+    const window = try allocator.alloc(u8, std.compress.flate.max_window_len);
+    defer allocator.free(window);
+    var comp = try std.compress.flate.Compress.init(&zw.writer, window, .zlib, .default);
+    try comp.writer.writeAll(raw);
+    try comp.finish();
+    const zlib = zw.written();
+
+    const total = 8 + 25 + (12 + zlib.len) + 12;
+    const out = try allocator.alloc(u8, total);
+    var b = Buf{ .data = out };
+    b.bytes(&[_]u8{ 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+
+    var ihdr: [13]u8 = undefined;
+    var hb = Buf{ .data = &ihdr };
+    hb.be32(w);
+    hb.be32(h);
+    hb.put(16); // bit depth
+    hb.put(0); // color type: grayscale
+    hb.put(0); // compression
+    hb.put(0); // filter
+    hb.put(0); // interlace
+    b.chunk("IHDR", &ihdr);
+    b.chunk("IDAT", zlib);
+    b.chunk("IEND", &[_]u8{});
+    return out;
+}
+
 // --------------------------------------------------------------------- main
 fn parseDim(s: []const u8, fallback: u32) u32 {
     const v = std.fmt.parseInt(u32, s, 10) catch return fallback;
@@ -260,6 +310,17 @@ test "parseDim falls back on junk and zero, parses valid" {
     try std.testing.expectEqual(@as(u32, 1920), parseDim("1920", 1280));
 }
 
+test "depth AOV uses the normalized procedural floor coordinate" {
+    try std.testing.expectEqual(@as(f32, 0.0), proceduralDepth(.{ .x = 0.5, .y = 0.2 }));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), proceduralDepth(.{ .x = 0.5, .y = 0.42 }), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), proceduralDepth(.{ .x = 0.5, .y = 1.0 }), 1e-6);
+}
+
+fn proceduralDepth(uv: Vec2) f32 {
+    const floorStart: f32 = 0.42;
+    return if (uv.y < floorStart) 0.0 else clamp01((uv.y - floorStart) / (1.0 - floorStart));
+}
+
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
     const io = init.io;
@@ -269,13 +330,25 @@ pub fn main(init: std.process.Init) !void {
     var height: u32 = 800;
     var time: f32 = 1.5;
     var turbidity: f32 = 1.0;
+    var write_depth = false;
+    var positional: u8 = 0;
 
     var it = init.minimal.args.iterate();
     _ = it.skip(); // argv[0]
-    if (it.next()) |a| width = parseDim(a, width);
-    if (it.next()) |a| height = parseDim(a, height);
-    if (it.next()) |a| time = std.fmt.parseFloat(f32, a) catch time;
-    if (it.next()) |a| turbidity = std.fmt.parseFloat(f32, a) catch turbidity;
+    while (it.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--depth")) {
+            write_depth = true;
+            continue;
+        }
+        switch (positional) {
+            0 => width = parseDim(arg, width),
+            1 => height = parseDim(arg, height),
+            2 => time = std.fmt.parseFloat(f32, arg) catch time,
+            3 => turbidity = std.fmt.parseFloat(f32, arg) catch turbidity,
+            else => {},
+        }
+        positional += 1;
+    }
 
     std.debug.print(
         \\========================================
@@ -285,8 +358,11 @@ pub fn main(init: std.process.Init) !void {
         \\
     , .{ width, height, time, turbidity });
 
-    const pixels = try allocator.alloc(u8, @as(usize, width) * height * 3);
+    const pixel_count = @as(usize, width) * height;
+    const pixels = try allocator.alloc(u8, pixel_count * 3);
     defer allocator.free(pixels);
+    const depth = if (write_depth) try allocator.alloc(f32, pixel_count) else null;
+    defer if (depth) |values| allocator.free(values);
 
     var y: u32 = 0;
     while (y < height) : (y += 1) {
@@ -297,6 +373,7 @@ pub fn main(init: std.process.Init) !void {
                 (@as(f32, @floatFromInt(y)) + 0.5) / @as(f32, @floatFromInt(height)),
             );
             const c = renderPool(uv, time, turbidity);
+            if (depth) |values| values[@as(usize, y) * width + x] = proceduralDepth(uv);
             const i = (@as(usize, y) * width + x) * 3;
             pixels[i + 0] = @intFromFloat(clamp01(c.x) * 255.0 + 0.5);
             pixels[i + 1] = @intFromFloat(clamp01(c.y) * 255.0 + 0.5);
@@ -316,4 +393,26 @@ pub fn main(init: std.process.Init) !void {
         \\Wrote robopool.png ({d} bytes).
         \\
     , .{png.len});
+
+    if (depth) |values| {
+        const depth_png = try encodeDepthPng(allocator, values, width, height);
+        defer allocator.free(depth_png);
+        const depth_file = try std.Io.Dir.cwd().createFile(io, "out_depth.png", .{});
+        defer depth_file.close(io);
+        try depth_file.writeStreamingAll(io, depth_png);
+
+        const depth_bin = try allocator.alloc(u8, values.len * @sizeOf(f32));
+        defer allocator.free(depth_bin);
+        for (values, 0..) |value, index| {
+            std.mem.writeInt(u32, depth_bin[index * 4 ..][0..4], @bitCast(value), .little);
+        }
+        const bin_file = try std.Io.Dir.cwd().createFile(io, "out_depth.bin", .{});
+        defer bin_file.close(io);
+        try bin_file.writeStreamingAll(io, depth_bin);
+
+        std.debug.print(
+            \\Depth normalization: near=0.000000 far=1.000000 (normalized procedural floor coordinate; not metric distance)
+            \\Wrote out_depth.png ({d} bytes) and out_depth.bin ({d} bytes).
+        , .{ depth_png.len, depth_bin.len });
+    }
 }
