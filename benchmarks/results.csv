@@ -1,0 +1,2 @@
+timestamp_utc,host,os,kernel,arch,zig_version,cpu_model,gpu_model,power_mode,backend,gaussian_count,width,height,repetition,wall_seconds,frame_seconds,status,command
+"2026-07-26T01:11:53Z","Mac.lan","Darwin","25.5.0","arm64","0.16.0","TODO: unavailable","TODO: unavailable","TODO: nvpmodel unavailable (not detected or not a Jetson)","cpu","1","4","4","1","TODO: run on hardware","TODO: run on hardware","pending: dry-run","printf should-not-run"
