@@ -6,6 +6,23 @@ caustics, particles, haze, vignette) and writes a compressed PNG. The encoder
 (CRC32, chunk assembly) is hand-rolled; deflate comes from Zig's stdlib
 (`std.compress.flate`). No GPU, no third-party libraries.
 
+## What this is and is not
+
+This repository is a dependency-free renderer and measurement tool for trained
+underwater Gaussian-splat scenes. It renders and measures existing scene output;
+training, optimisation, camera calibration, and COLMAP reconstruction happen in
+other repositories. The original 3D Gaussian Splatting implementation is
+[GraphDeco/INRIA's reference repository](https://github.com/graphdeco-inria/gaussian-splatting);
+underwater training/reconstruction examples include
+[SeaSplat](https://github.com/dxyang/seasplat) and
+[Gaussian Splashing](https://github.com/BGU-CS-VIL/gaussianSplashing). This
+repository does not claim benchmark, performance, or accuracy results; none
+have been measured here.
+
+The image-formation equation, symbol table, units, citations, and the precise
+boundary between the splat and legacy procedural paths are documented in
+[`docs/model.md`](docs/model.md).
+
 ## Run
 
 ```sh
