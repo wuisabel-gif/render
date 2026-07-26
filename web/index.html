@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Underwater Gaussian viewer (WebGPU preview)</title>
+  <style>
+    :root { color-scheme: dark; font: 16px system-ui, sans-serif; }
+    body { margin: 0; background: #07121c; color: #e5f5ff; }
+    main { max-width: 1100px; margin: auto; padding: 1rem; }
+    canvas { display: block; width: 100%; aspect-ratio: 16 / 9; background: #02070b; border: 1px solid #28475a; touch-action: none; }
+    .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .75rem 1rem; margin-top: 1rem; }
+    label { display: grid; gap: .25rem; color: #b9d9e8; }
+    input { width: 100%; accent-color: #4bc1d8; }
+    output { color: #fff; font-variant-numeric: tabular-nums; }
+    #status { padding: .75rem; margin: 0 0 1rem; background: #102b3a; border-left: 4px solid #4bc1d8; }
+    .hint { color: #9db7c4; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Underwater viewer preview</h1>
+    <p id="status" role="status">Checking WebGPU support…</p>
+    <canvas id="view" aria-label="Underwater procedural preview"></canvas>
+    <p class="hint">Drag the canvas to orbit the camera. This preview demonstrates the raster/medium contract; it does not load a PLY scene.</p>
+    <section class="controls" aria-label="Medium coefficients">
+      <label>Direct attenuation (red) <output id="bdRValue"></output><input id="bdR" type="range" min="0" max="2" step="0.01" value="0.35"></label>
+      <label>Direct attenuation (green) <output id="bdGValue"></output><input id="bdG" type="range" min="0" max="2" step="0.01" value="0.12"></label>
+      <label>Direct attenuation (blue) <output id="bdBValue"></output><input id="bdB" type="range" min="0" max="2" step="0.01" value="0.06"></label>
+      <label>Backscatter (red) <output id="bbRValue"></output><input id="bbR" type="range" min="0" max="2" step="0.01" value="0.08"></label>
+      <label>Backscatter (green) <output id="bbGValue"></output><input id="bbG" type="range" min="0" max="2" step="0.01" value="0.18"></label>
+      <label>Backscatter (blue) <output id="bbBValue"></output><input id="bbB" type="range" min="0" max="2" step="0.01" value="0.28"></label>
+      <label>Water colour (red) <output id="biRValue"></output><input id="biR" type="range" min="0" max="1" step="0.01" value="0.04"></label>
+      <label>Water colour (green) <output id="biGValue"></output><input id="biG" type="range" min="0" max="1" step="0.01" value="0.22"></label>
+      <label>Water colour (blue) <output id="biBValue"></output><input id="biB" type="range" min="0" max="1" step="0.01" value="0.30"></label>
+    </section>
+  </main>
+  <script type="module" src="./viewer.js"></script>
+</body>
+</html>
