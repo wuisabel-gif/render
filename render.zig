@@ -317,6 +317,51 @@ fn parseVec3(s: []const u8) ?[3]f32 {
     return values;
 }
 
+fn skipJsonSpace(data: []const u8, index: *usize) void {
+    while (index.* < data.len and (data[index.*] == ' ' or data[index.*] == '\n' or data[index.*] == '\r' or data[index.*] == '\t')) : (index.* += 1) {}
+}
+
+fn parseJsonVec3(data: []const u8, key: []const u8) ![3]f32 {
+    var quoted_key: [32]u8 = undefined;
+    if (key.len + 2 > quoted_key.len) return error.InvalidMediumKey;
+    quoted_key[0] = '"';
+    @memcpy(quoted_key[1 .. key.len + 1], key);
+    quoted_key[key.len + 1] = '"';
+    const found = std.mem.indexOfPos(u8, data, 0, quoted_key[0 .. key.len + 2]) orelse return error.MissingMediumKey;
+    var index = found + key.len + 2;
+    skipJsonSpace(data, &index);
+    if (index >= data.len or data[index] != ':') return error.InvalidMediumConfig;
+    index += 1;
+    skipJsonSpace(data, &index);
+    if (index >= data.len or data[index] != '[') return error.InvalidMediumConfig;
+    index += 1;
+
+    var values: [3]f32 = undefined;
+    for (0..3) |channel| {
+        skipJsonSpace(data, &index);
+        const start = index;
+        while (index < data.len and (std.ascii.isDigit(data[index]) or data[index] == '-' or data[index] == '+' or data[index] == '.' or data[index] == 'e' or data[index] == 'E')) : (index += 1) {}
+        if (start == index) return error.InvalidMediumValue;
+        values[channel] = std.fmt.parseFloat(f32, data[start..index]) catch return error.InvalidMediumValue;
+        skipJsonSpace(data, &index);
+        if (channel < 2) {
+            if (index >= data.len or data[index] != ',') return error.InvalidMediumConfig;
+            index += 1;
+        }
+    }
+    skipJsonSpace(data, &index);
+    if (index >= data.len or data[index] != ']') return error.InvalidMediumConfig;
+    return values;
+}
+
+fn parseMediumConfig(data: []const u8) !medium.Params {
+    return .{
+        .beta_d = try parseJsonVec3(data, "beta_d"),
+        .beta_b = try parseJsonVec3(data, "beta_b"),
+        .b_inf = try parseJsonVec3(data, "b_inf"),
+    };
+}
+
 test "parseDim falls back on junk and zero, parses valid" {
     try std.testing.expectEqual(@as(u32, 1280), parseDim("abc", 1280));
     try std.testing.expectEqual(@as(u32, 1280), parseDim("0", 1280));
@@ -333,6 +378,15 @@ test "parseVec3 accepts exactly three floats" {
     try std.testing.expectEqual([3]f32{ 0.1, 0.2, 0.3 }, parseVec3("0.1,0.2,0.3").?);
     try std.testing.expect(parseVec3("0.1,0.2") == null);
     try std.testing.expect(parseVec3("0.1,0.2,0.3,0.4") == null);
+}
+
+test "medium JSON config parses channel arrays" {
+    const params = try parseMediumConfig(
+        "{\"beta_d\":[1,2,3],\"beta_b\":[0.1,0.2,0.3],\"b_inf\":[0.01,0.02,0.03]}",
+    );
+    try std.testing.expectEqual([3]f32{ 1, 2, 3 }, params.beta_d);
+    try std.testing.expectEqual([3]f32{ 0.1, 0.2, 0.3 }, params.beta_b);
+    try std.testing.expectEqual([3]f32{ 0.01, 0.02, 0.03 }, params.b_inf);
 }
 
 fn proceduralDepth(uv: Vec2) f32 {
@@ -354,6 +408,7 @@ pub fn main(init: std.process.Init) !void {
     var beta_d_override: ?[3]f32 = null;
     var beta_b_override: ?[3]f32 = null;
     var b_inf_override: ?[3]f32 = null;
+    var medium_path: ?[]const u8 = null;
 
     var it = init.minimal.args.iterate();
     _ = it.skip(); // argv[0]
@@ -364,6 +419,10 @@ pub fn main(init: std.process.Init) !void {
         }
         if (std.mem.eql(u8, arg, "--turbidity")) {
             turbidity = std.fmt.parseFloat(f32, it.next() orelse return error.MissingTurbidity) catch return error.InvalidTurbidity;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--medium")) {
+            medium_path = it.next() orelse return error.MissingMediumPath;
             continue;
         }
         if (std.mem.eql(u8, arg, "--beta-d") or std.mem.startsWith(u8, arg, "--beta-d=")) {
@@ -397,6 +456,11 @@ pub fn main(init: std.process.Init) !void {
         .beta_b = turbidityVector,
         .b_inf = .{ 0.015, 0.18, 0.28 },
     };
+    if (medium_path) |path| {
+        const config_data = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(64 * 1024));
+        defer allocator.free(config_data);
+        params = parseMediumConfig(config_data) catch return error.InvalidMediumConfig;
+    }
     if (beta_d_override) |value| params.beta_d = value;
     if (beta_b_override) |value| params.beta_b = value;
     if (b_inf_override) |value| params.b_inf = value;

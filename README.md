@@ -31,7 +31,12 @@ For channel-wise control, pass comma-separated RGB values with
 `--beta-d R,G,B`, `--beta-b R,G,B`, and `--b-inf R,G,B`. These options use the
 legacy procedural path's normalized screen-space coordinate rather than metric
 scene distance. Positional `turbidity` remains supported for compatibility and
-is overridden per channel when an explicit option is supplied.
+is overridden per channel when an explicit option is supplied. The same parameters can be loaded from
+JSON with `--medium params.json`; explicit channel flags take precedence. The
+repository includes `presets/clear_pool.json` and
+`presets/coastal_turbid.json` as renderer-compatibility templates, not measured
+water presets. Their values are not published coefficient claims; calibrated
+values must be supplied from a documented experiment.
 
 ## Renders
 
